@@ -1,4 +1,4 @@
-import RBush from 'rbush';
+
 import { GameConstants } from './GameConstants';
 import { Ship } from './Ship';
 import { RobotShip } from './RobotShip';
@@ -27,8 +27,8 @@ export class Scene extends Phaser.Scene implements GameInterface {
 
     private readonly robotPlayers = new Array<RobotShip>();
     private starfield!: Phaser.GameObjects.Graphics;
-    private asteroids!: Phaser.GameObjects.Graphics;
-    private asteroidTree!: RBush<{ minX: number, minY: number, maxX: number, maxY: number, size: number }>;
+    private asteroids!: Phaser.Physics.Arcade.StaticGroup;
+    private torpedoGroup!: Phaser.Physics.Arcade.Group;
     private readonly explosions = new Set<Phaser.Math.Vector2>();
     private gameState = GameState.BeforeStart;
 
@@ -69,7 +69,71 @@ export class Scene extends Phaser.Scene implements GameInterface {
             }
         }
 
+        if (!this.textures.exists('asteroid_0')) {
+            for (let i = 0; i < 5; i++) {
+                this.createAsteroidTexture(`asteroid_${i}`);
+            }
+        }
+
         this.sounds.preload(this);
+    }
+
+    createAsteroidTexture(key: string) {
+        const size = 100;
+        const canvas = this.textures.createCanvas(key, size, size);
+        if (canvas === null) return;
+
+        const context = canvas.getContext();
+        const centerX = size / 2;
+        const centerY = size / 2;
+        const radius = size / 2 - 5; // Leave some padding
+
+        // Draw jagged asteroid shape
+        context.fillStyle = '#888888';
+        context.beginPath();
+        const points = 16;
+        for (let i = 0; i < points; i++) {
+            const angle = (i / points) * Math.PI * 2;
+            const variance = Phaser.Math.FloatBetween(0.9, 1.0);
+            const r = radius * variance;
+            const x = centerX + Math.cos(angle) * r;
+            const y = centerY + Math.sin(angle) * r;
+            if (i === 0) context.moveTo(x, y);
+            else context.lineTo(x, y);
+        }
+        context.closePath();
+        context.fill();
+
+        // Add craters
+        context.globalCompositeOperation = 'source-atop';
+        const craterCount = Phaser.Math.Between(3, 6);
+        for (let i = 0; i < craterCount; i++) {
+            const cx = Phaser.Math.Between(10, size - 10);
+            const cy = Phaser.Math.Between(10, size - 10);
+            const cr = Phaser.Math.Between(5, 15);
+
+            context.fillStyle = '#666666';
+            context.beginPath();
+            context.arc(cx, cy, cr, 0, Math.PI * 2);
+            context.fill();
+
+            // Crater shadow
+            context.fillStyle = '#555555';
+            context.beginPath();
+            context.arc(cx + 2, cy + 2, cr * 0.8, 0, Math.PI * 2);
+            context.fill();
+        }
+
+        // Add surface noise/texture
+        for (let i = 0; i < 100; i++) {
+            const nx = Phaser.Math.Between(0, size);
+            const ny = Phaser.Math.Between(0, size);
+            context.fillStyle = Phaser.Math.RND.pick(['#777777', '#999999']);
+            context.fillRect(nx, ny, 2, 2);
+        }
+
+        context.globalCompositeOperation = 'source-over';
+        canvas.refresh();
     }
 
     create() {
@@ -85,22 +149,60 @@ export class Scene extends Phaser.Scene implements GameInterface {
             this.starfield.fillPoint(x, y, 2);
         }
 
-        this.asteroidTree = new RBush();
+
 
         // Create asteroids
-        this.asteroids = this.add.graphics();
-        for (let i = 0; i < 0; i++) {
-            const x = Phaser.Math.Between(0, GameConstants.boundaryWidth);
-            const y = Phaser.Math.Between(0, GameConstants.boundaryHeight);
-            const size = Phaser.Math.Between(10, 50); // Random size
-            this.asteroids.fillStyle(0x888888, 1);
-            this.asteroids.fillCircle(x, y, size);
-            this.asteroidTree.insert({ minX: x - size, minY: y - size, maxX: x + size, maxY: y + size, size });
+        this.asteroids = this.physics.add.staticGroup();
+        this.torpedoGroup = this.physics.add.group();
+
+        const safeZones: { x: number, y: number, radius: number }[] = [];
+        // Player safe zone
+        safeZones.push({ x: GameConstants.boundaryWidth / 2, y: GameConstants.boundaryHeight / 2, radius: 200 });
+
+        // Robot ships safe zones
+        const center = new Phaser.Math.Vector2(GameConstants.boundaryWidth / 2, GameConstants.boundaryHeight / 2);
+        const angleStep = Math.PI * 2 / this.enemyCount;
+        const radius = 400;
+        for (let i = 0; i < this.enemyCount; i++) {
+            const angle = angleStep * i;
+            const position = center.clone().setToPolar(angle, radius);
+            safeZones.push({ x: position.x, y: position.y, radius: 200 });
         }
+
+        for (let i = 0; i < GameConstants.asteroidCount; i++) {
+            let x = 0;
+            let y = 0;
+            let safe = false;
+
+            while (!safe) {
+                x = Phaser.Math.Between(0, GameConstants.boundaryWidth);
+                y = Phaser.Math.Between(0, GameConstants.boundaryHeight);
+                safe = true;
+
+                for (const zone of safeZones) {
+                    if (Phaser.Math.Distance.Between(x, y, zone.x, zone.y) < zone.radius) {
+                        safe = false;
+                        break;
+                    }
+                }
+            }
+
+            const size = Phaser.Math.Between(10, 50); // Random size
+
+            const textureKey = `asteroid_${Phaser.Math.Between(0, 4)}`;
+            const asteroid = this.asteroids.create(x, y, textureKey);
+            asteroid.setDisplaySize(size * 2, size * 2);
+            asteroid.refreshBody();
+            const scale = (size * 2) / 100;
+            asteroid.setCircle(40 * scale, 10 * scale, 10 * scale);
+        }
+
+        this.physics.add.overlap(this.torpedoGroup, this.asteroids, this.handleTorpedoAsteroidCollision, undefined, this);
 
         const poly = this.add.polygon(GameConstants.boundaryWidth / 2, GameConstants.boundaryHeight / 2, Scene.shipDimensions, 0xaaaaaa);
         this.physics.add.existing(poly);
         this.player = new Ship(poly, this.add.graphics());
+        this.physics.add.collider(this.player.polygon, this.asteroids, this.handleAsteroidCollision, undefined, this);
 
         this.addRobotShips();
 
@@ -187,6 +289,11 @@ export class Scene extends Phaser.Scene implements GameInterface {
         this.robotPlayers.push(robotPlayer);
 
         this.physics.add.collider(this.player.polygon, polygon, this.handleShipCollision, undefined, this);
+        this.physics.add.collider(polygon, this.asteroids, this.handleAsteroidCollision, undefined, this);
+    }
+
+    handleTorpedoAsteroidCollision(torpedo: ArcadeBody, asteroid: ArcadeBody) {
+        this.explodeTorpedo(torpedo as Phaser.GameObjects.Graphics);
     }
 
     handleShipCollision(player: ArcadeBody, robot: ArcadeBody) {
@@ -201,6 +308,25 @@ export class Scene extends Phaser.Scene implements GameInterface {
 
         this.explodePlayer();
         this.explodeRobotPlayer(robotPlayer!);
+    }
+
+    handleAsteroidCollision(shipPolygon: ArcadeBody, asteroid: ArcadeBody) {
+        if (this.gameState !== GameState.Running) {
+            return;
+        }
+
+        let ship: Ship | undefined = undefined;
+        if (shipPolygon === this.player.polygon) {
+            ship = this.player;
+        } else {
+            ship = this.robotPlayers.find(robotPlayer => robotPlayer.polygon === shipPolygon);
+        }
+
+        if (ship) {
+            const bounceVelocity = ship.lastVelocity.clone().negate();
+            ship.body.setVelocity(bounceVelocity.x, bounceVelocity.y);
+            ship.desiredVelocity = bounceVelocity;
+        }
     }
 
     launchTorpedo(ship: Ship, targetX: number, targetY: number) {
@@ -232,9 +358,10 @@ export class Scene extends Phaser.Scene implements GameInterface {
         }
 
         // Add torpedo to the physics system
-        this.physics.add.existing(torpedo);
+        this.torpedoGroup.add(torpedo);
         const torpedoBody = torpedo.body as Phaser.Physics.Arcade.Body;
         torpedoBody.setCollideWorldBounds(false);
+        torpedoBody.setCircle(2, -2, -2);
         torpedoBody.setMaxSpeed(GameConstants.torpedoSpeed);
         this.physics.moveTo(torpedo, targetX, targetY, GameConstants.torpedoSpeed);
 
@@ -315,17 +442,7 @@ export class Scene extends Phaser.Scene implements GameInterface {
             }
         }
 
-        for (const torpedo of this.torpedoes.keys()) {
-            const maybeCollidingAsteroids = this.asteroidTree.search({ minX: torpedo.x - 2, minY: torpedo.y - 10, maxX: torpedo.x + 2, maxY: torpedo.y + 10 });
-            for (const maybeCollidingAsteroid of maybeCollidingAsteroids) {
-                const x = (maybeCollidingAsteroid.minX + maybeCollidingAsteroid.maxX) / 2;
-                const y = (maybeCollidingAsteroid.minY + maybeCollidingAsteroid.maxY) / 2;
-                if (Phaser.Math.Distance.Between(torpedo.x, torpedo.y, x, y) < maybeCollidingAsteroid.size) {
-                    this.explodeTorpedo(torpedo);
-                    break;
-                }
-            }
-        }
+
 
         for (const explosion of this.explosions) {
             if (this.player.polygon.active && Phaser.Math.Distance.BetweenPointsSquared(this.player.polygon.getCenter(), explosion) < GameConstants.explosionRadius ** 2) {
@@ -426,7 +543,7 @@ export class Scene extends Phaser.Scene implements GameInterface {
             this.player.desiredVelocity.set(0, 0);
         }
 
-        for (const [ torpedo, { destinationMarker, emitter } ] of this.torpedoes.entries()) {
+        for (const [torpedo, { destinationMarker, emitter }] of this.torpedoes.entries()) {
             torpedo.destroy();
             destinationMarker?.destroy();
             emitter.destroy();

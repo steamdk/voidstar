@@ -4,6 +4,7 @@ import "phaser";
 export class Ship {
     public desiredRotation = 0;
     public readonly _desiredVelocity = new Phaser.Math.Vector2(0, 0);
+    public readonly lastVelocity = new Phaser.Math.Vector2(0, 0);
 
     public readonly polygon: Phaser.GameObjects.Polygon;
     public readonly body: Phaser.Physics.Arcade.Body;
@@ -98,6 +99,7 @@ export class Ship {
         // Update the ship's desired rotation and velocity
         const currentRotation = this.polygon.rotation;
         const currentVelocity = this.body.velocity;
+        this.lastVelocity.set(currentVelocity.x, currentVelocity.y);
 
         // Use lerping to smoothly rotate the ship
         const rotationLerpFactor = 0.1; // Adjust this factor to control the lerp speed

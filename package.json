@@ -11,11 +11,9 @@
   "license": "Apache-2.0",
   "description": "A little game written with Phaser 3",
   "dependencies": {
-    "phaser": "^3.87.0",
-    "rbush": "^4.0.1"
+    "phaser": "^3.87.0"
   },
   "devDependencies": {
-    "@types/rbush": "^4.0.0",
     "copy-webpack-plugin": "^13.0.0",
     "html-webpack-plugin": "^5.6.3",
     "ts-loader": "^9.5.1",

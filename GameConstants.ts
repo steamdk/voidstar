@@ -19,4 +19,5 @@ export const GameConstants = {
     enemyShipCount: parseFloat(urlParams.get('enemyShipCount') ?? '4'),
     // respawn time in seconds
     respawnTime: parseFloat(urlParams.get('respawnTime') ?? '5'),
+    asteroidCount: parseFloat(urlParams.get('asteroidCount') ?? '600'),
 }

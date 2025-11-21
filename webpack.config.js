@@ -39,6 +39,7 @@ module.exports = {
             // and not allow any straggling "old" SWs to hang around
             clientsClaim: true,
             skipWaiting: true,
+            maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
         })
     ],
     devtool: 'source-map',
